@@ -871,7 +871,7 @@ def denoise(model,zt,t,s,alpha_schedule,sigma_schedule,latents,prompt_embeds,pro
             return_dict=False,
         )[0]
     
-    if model.config.out_channels // 2 == latent_channels:
+    if model.module.config.out_channels // 2 == latent_channels:
         noise = noise.chunk(2, dim=1)[0]
     else:
         noise = noise
@@ -1063,8 +1063,10 @@ def main(args):
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)
 
-    if args.gradient_checkpointing:
-        transformer.enable_gradient_checkpointing()
+    
+    transformer.gradient_checkpointing = True
+    # if args.gradient_checkpointing:
+    #     transformer.enable_gradient_checkpointing()
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
     if args.use_8bit_adam:
@@ -1183,7 +1185,7 @@ def main(args):
     steps=args.num_train_inferences
     Tstep=len(alpha_schedule)/steps
     Tstep=round(Tstep)
-    latent_channels = transformer.config.in_channels
+    latent_channels = transformer.module.config.in_channels
 
     vae_scale_factor = ae_stride_config["CausalVAEModel_D4_4x8x8"]
     length_alpha_schedule = len(alpha_schedule)
