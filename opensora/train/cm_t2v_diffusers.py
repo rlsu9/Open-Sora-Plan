@@ -387,6 +387,12 @@ def main(args):
     model = freeze_layer(model)
 
     noise_scheduler = DDPMScheduler()
+
+    alpha_schedule = torch.sqrt(noise_scheduler.alphas_cumprod)
+    sigma_schedule = torch.sqrt(1-noise_scheduler.alphas_cumprod)
+    alpha_schedule=alpha_schedule.to(accelerator.device).to(weight_dtype)
+    sigma_schedule=sigma_schedule.to(accelerator.device).to(weight_dtype)
+
     # Move unet, vae and text_encoder to device and cast to weight_dtype
     # The VAE is in float32 to avoid NaN losses.
     ae.vae.to(accelerator.device, dtype=torch.float32)
@@ -660,7 +666,7 @@ def main(args):
         logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
         progress_bar.set_postfix(**logs)
 
-    def run(model_input, model_kwargs, prof):
+    def run(model_input, model_kwargs, uncond_model_kwargs, prof):
         global start_time
         start_time = time.time()
 
@@ -673,8 +679,8 @@ def main(args):
         bsz = model_input.shape[0]
         current_step_frame = model_input.shape[2]
         # Sample a random timestep for each image without bias.
-        timesteps = torch.randint(20, noise_scheduler.config.num_train_timesteps, (bsz,), device=model_input.device)
-        teacher_timesteps = timesteps - 20
+        timesteps = torch.randint(10, noise_scheduler.config.num_train_timesteps, (bsz,), device=model_input.device)
+        teacher_timesteps = timesteps - 10
 
         if current_step_frame != 1 and get_sequence_parallel_state():  # image do not need sp
             broadcast(timesteps)
@@ -688,20 +694,49 @@ def main(args):
         import copy
         teacher_model_kwargs = copy.deepcopy(model_kwargs)
 
-        with torch.no_grad():
-            teacher_model_pred = teacher_model(
+        
+        def ddim_solver(model, timesteps):
+            cond_pred = model(
                 noisy_model_input,
-                teacher_timesteps,
+                timesteps,
                 return_dict=False,
-                **teacher_model_kwargs
+                **model_kwargs
             )[0]
 
-        model_pred = model(
-            noisy_model_input,
-            timesteps,
-            return_dict=False,
-            **model_kwargs
-        )[0]
+            uncond_pred = model(
+                noisy_model_input,
+                timesteps,
+                return_dict=False,
+                **uncond_model_kwargs
+            )[0]
+
+            noise_pred_text=cond_pred
+            noise_pred_uncond=uncond_pred
+            guidance_scale = 4.5
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+
+            alpha_t=alpha_schedule[timesteps].view(-1,1,1,1,1)
+            sigma_t=sigma_schedule[timesteps].view(-1,1,1,1,1)
+            alpha_s=alpha_schedule[teacher_timesteps].view(-1,1,1,1,1)
+            sigma_s=sigma_schedule[teacher_timesteps].view(-1,1,1,1,1)
+            pred_x=(noisy_model_input-sigma_t*noise_pred)/alpha_t
+
+            result=alpha_s*pred_x+sigma_s*noise_pred
+            return result
+        
+        
+        with torch.no_grad():
+            teacher_model_pred = ddim_solver(teacher_model, teacher_timesteps)
+            
+        model_pred = ddim_solver(model, timesteps)
+
+        # model_pred = model(
+        #     noisy_model_input,
+        #     timesteps,
+        #     return_dict=False,
+        #     **model_kwargs
+        # )[0]
         # Get the target for loss depending on the prediction type
         if args.prediction_type is not None:
             # set prediction_type of scheduler if defined
@@ -730,35 +765,40 @@ def main(args):
         if mask is not None:
             mask = mask.unsqueeze(1).repeat(1, c, 1, 1, 1).float()  # b t h w -> b c t h w
             mask = mask.reshape(b, -1)
-        if args.snr_gamma is None:
-            print("loss is calculated by MSE")
-            # model_pred: b c t h w, attention_mask: b t h w
-            loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-            loss = loss.reshape(b, -1)
-            if mask is not None:
-                loss = (loss * mask).sum() / mask.sum()  # mean loss on unpad patches
-            else:
-                loss = loss.mean()
-        else:
-            print("loss is calculated by snr")
-            # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
-            # Since we predict the noise instead of x_0, the original formulation is slightly changed.
-            # This is discussed in Section 4.2 of the same paper.
-            snr = compute_snr(noise_scheduler, timesteps)
-            mse_loss_weights = torch.stack([snr, args.snr_gamma * torch.ones_like(timesteps)], dim=1).min(
-                dim=1
-            )[0]
-            if noise_scheduler.config.prediction_type == "epsilon":
-                mse_loss_weights = mse_loss_weights / snr
-            elif noise_scheduler.config.prediction_type == "v_prediction":
-                mse_loss_weights = mse_loss_weights / (snr + 1)
-            loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-            loss = loss.reshape(b, -1)
-            mse_loss_weights = mse_loss_weights.reshape(b, 1)
-            if mask is not None:
-                loss = (loss * mask * mse_loss_weights).sum() / mask.sum()  # mean loss on unpad patches
-            else:
-                loss = (loss * mse_loss_weights).mean()
+        
+        
+        ref_diff=target-model_pred
+        loss=torch.norm(ref_diff.view(bsz,-1),dim=1)
+        loss = loss.mean()
+        # if args.snr_gamma is None:
+        #     print("loss is calculated by MSE")
+        #     # model_pred: b c t h w, attention_mask: b t h w
+        #     loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+        #     loss = loss.reshape(b, -1)
+        #     if mask is not None:
+        #         loss = (loss * mask).sum() / mask.sum()  # mean loss on unpad patches
+        #     else:
+        #         loss = loss.mean()
+        # else:
+        #     print("loss is calculated by snr")
+        #     # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
+        #     # Since we predict the noise instead of x_0, the original formulation is slightly changed.
+        #     # This is discussed in Section 4.2 of the same paper.
+        #     snr = compute_snr(noise_scheduler, timesteps)
+        #     mse_loss_weights = torch.stack([snr, args.snr_gamma * torch.ones_like(timesteps)], dim=1).min(
+        #         dim=1
+        #     )[0]
+        #     if noise_scheduler.config.prediction_type == "epsilon":
+        #         mse_loss_weights = mse_loss_weights / snr
+        #     elif noise_scheduler.config.prediction_type == "v_prediction":
+        #         mse_loss_weights = mse_loss_weights / (snr + 1)
+        #     loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+        #     loss = loss.reshape(b, -1)
+        #     mse_loss_weights = mse_loss_weights.reshape(b, 1)
+        #     if mask is not None:
+        #         loss = (loss * mask * mse_loss_weights).sum() / mask.sum()  # mean loss on unpad patches
+        #     else:
+        #         loss = (loss * mse_loss_weights).mean()
 
         # Gather the losses across all processes for logging (if we use distributed training).
         avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
@@ -803,7 +843,7 @@ def main(args):
 
     def train_one_step(step_, data_item_, prof_=None):
         train_loss = 0.0
-        x, attn_mask, input_ids, cond_mask = data_item_
+        x, attn_mask, input_ids, cond_mask, uncond_attn_mask, uncond_input_ids, uncond_mask = data_item_
         if args.group_frame or args.group_resolution:
             if not args.group_frame:
                 each_latent_frame = torch.any(attn_mask.flatten(-2), dim=-1).int().sum(-1).tolist()
@@ -817,6 +857,9 @@ def main(args):
         attn_mask = attn_mask.to(accelerator.device)  # B T+num_images H W
         input_ids = input_ids.to(accelerator.device)  # B 1+num_images L
         cond_mask = cond_mask.to(accelerator.device)  # B 1+num_images L
+        uncond_attn_mask = uncond_attn_mask.to(accelerator.device)  # B T H W
+        uncond_input_ids = uncond_input_ids.to(accelerator.device)  # B 1 L
+        uncond_mask = uncond_mask.to(accelerator.device)  # B 1 L
         # if accelerator.process_index == 0:
         #     logger.info(f'rank: {accelerator.process_index}, x: {x.shape}, attn_mask: {attn_mask.shape}')
 
@@ -827,6 +870,11 @@ def main(args):
             cond_mask_ = cond_mask.reshape(-1, L)
             cond = text_enc(input_ids_, cond_mask_)  # B 1+num_images L D
             cond = cond.reshape(B, N, L, -1)
+
+            uncond_input_ids_ = uncond_input_ids.reshape(-1, L)
+            uncond_mask_ = uncond_mask.reshape(-1, L)
+            uncond = text_enc(uncond_input_ids_, uncond_mask_)  # B 1 L D
+            uncond = uncond.reshape(B, 1, L, -1)
             # Map input images to latent space + normalize latents
             x = ae.encode(x)  # B C T H W
 
@@ -851,6 +899,7 @@ def main(args):
             else:
                 set_sequence_parallel_state(True)
         if get_sequence_parallel_state():
+            assert False
             x, cond, attn_mask, cond_mask, use_image_num = prepare_parallel_data(x, cond, attn_mask, cond_mask,
                                                                                  args.use_image_num)
             for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
@@ -868,7 +917,9 @@ def main(args):
                 x = x.to(weight_dtype)
                 model_kwargs = dict(encoder_hidden_states=cond, attention_mask=attn_mask,
                                     encoder_attention_mask=cond_mask, use_image_num=args.use_image_num)
-                run(x, model_kwargs, prof_)
+                uncond_model_kwargs = dict(encoder_hidden_states=uncond, attention_mask=uncond_attn_mask,
+                                           encoder_attention_mask=uncond_mask, use_image_num=args.use_image_num)
+                run(x, model_kwargs, uncond_model_kwargs, prof_)
 
         set_sequence_parallel_state(current_step_sp_state)  # in case the next step use sp, which need broadcast(timesteps)
 

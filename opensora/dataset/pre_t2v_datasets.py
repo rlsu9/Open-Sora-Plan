@@ -89,7 +89,7 @@ class PRE_T2V_dataset(Dataset):
         video = video.transpose(0, 1)  # T C H W -> C T H W
         text = self.vid_cap_list[idx]['cap']
         print(text)
-        text = text_preprocessing(text, support_Chinese=self.support_Chinese) if random.random() > self.cfg else ""
+        text = text_preprocessing(text, support_Chinese=self.support_Chinese)
         #print(video.shape, text)        
         text_tokens_and_mask = self.tokenizer(
             text,
@@ -102,7 +102,20 @@ class PRE_T2V_dataset(Dataset):
         )
         input_ids = text_tokens_and_mask['input_ids']
         cond_mask = text_tokens_and_mask['attention_mask']
-        return dict(pixel_values=video, input_ids=input_ids, cond_mask=cond_mask)
+
+        uncond_text_tokens_and_mask = self.tokenizer(
+            "",
+            max_length=self.model_max_length,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            add_special_tokens=True,
+            return_tensors='pt'
+        )
+        uncond_input_ids = uncond_text_tokens_and_mask['input_ids']
+        uncond_mask = uncond_text_tokens_and_mask['attention_mask']
+
+        return dict(pixel_values=video, input_ids=input_ids, cond_mask=cond_mask, uncond_input_ids=uncond_input_ids, uncond_mask=uncond_mask)
 
     def get_image_from_video(self, video_data):
         select_image_idx = np.linspace(0, self.num_frames-1, self.use_image_num, dtype=int)

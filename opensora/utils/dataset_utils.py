@@ -74,17 +74,20 @@ class Collate:
         batch_tubes = [i['pixel_values'] for i in batch]  # b [c t h w]
         input_ids = [i['input_ids'] for i in batch]  # b [1 l]
         cond_mask = [i['cond_mask'] for i in batch]  # b [1 l]
-        return batch_tubes, input_ids, cond_mask
+        uncond_input_ids = [i['uncond_input_ids'] for i in batch]  # b [1 l]
+        uncond_mask = [i['uncond_mask'] for i in batch]  # b [1 l]
+        return batch_tubes, input_ids, cond_mask, uncond_input_ids, uncond_mask
 
     def __call__(self, batch):
-        batch_tubes, input_ids, cond_mask = self.package(batch)
+        batch_tubes, input_ids, cond_mask, uncond_input_ids, uncond_mask = self.package(batch)
 
         ds_stride = self.ae_stride * self.patch_size
         t_ds_stride = self.ae_stride_t * self.patch_size_t
         
         pad_batch_tubes, attention_mask, input_ids, cond_mask = self.process(batch_tubes, input_ids, cond_mask, t_ds_stride, ds_stride, self.max_thw, self.ae_stride_thw)
+        _, uncond_attention_mask, uncond_input_ids, uncond_mask = self.process(batch_tubes, uncond_input_ids, uncond_mask, t_ds_stride, ds_stride, self.max_thw, self.ae_stride_thw)
         assert not torch.any(torch.isnan(pad_batch_tubes)), 'after pad_batch_tubes'
-        return pad_batch_tubes, attention_mask, input_ids, cond_mask
+        return pad_batch_tubes, attention_mask, input_ids, cond_mask, uncond_attention_mask, uncond_input_ids, uncond_mask
 
 
     def process(self, batch_tubes, input_ids, cond_mask, t_ds_stride, ds_stride, max_thw, ae_stride_thw):
