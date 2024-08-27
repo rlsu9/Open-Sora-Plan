@@ -8,6 +8,7 @@ from opensora.dataset.t2v_datasets import T2V_dataset
 from opensora.dataset.inpaint_datasets import Inpaint_dataset
 from opensora.dataset.transform import ToTensorVideo, TemporalRandomCrop, RandomHorizontalFlipVideo, CenterCropResizeVideo, LongSideResizeVideo, SpatialStrideCropVideo
 from opensora.models.causalvideovae import ae_norm, ae_denorm
+from opensora.dataset.pre_t2v_datasets import PRE_T2V_dataset
 
 def getdataset(args):
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
@@ -29,8 +30,7 @@ def getdataset(args):
     # tokenizer = AutoTokenizer.from_pretrained("/storage/ongoing/new/Open-Sora-Plan/cache_dir/mt5-xxl", cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir)
     if args.dataset == 't2v':
-        return T2V_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 
-                           transform_topcrop=transform_topcrop)
+        return PRE_T2V_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer)
     elif args.dataset == 'inpaint' or args.dataset == 'i2v':
         return Inpaint_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 
                             transform_topcrop=transform_topcrop)

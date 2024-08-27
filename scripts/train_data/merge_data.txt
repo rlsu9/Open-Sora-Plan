@@ -1,2 +1,1 @@
-
-/storage/dataset/panda70m,/storage/dataset/filter_aes/filter_panda70m_json/panda70m_last_6268414_flowValue_940432_5.4plus.json
+/workspace/rlsu/documents/attn_distill/all_mixkit,/workspace/rlsu/documents/attn_distill/video_mixkit_65f_54735.json
