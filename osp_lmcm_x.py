@@ -938,7 +938,7 @@ def prepare_latents(scheduler, batch_size, num_channels_latents, num_frames, hei
         latents = latents.to(device)
 
     # scale the initial noise by the standard deviation required by the scheduler
-    latents = latents * scheduler.init_noise_sigma
+    # latents = latents * scheduler.init_noise_sigma
 
 
     return latents
@@ -1290,7 +1290,7 @@ def main(args):
                     prompt_attention_mask=None,
                     negative_prompt_attention_mask=None,
                     clean_caption=True,
-                    max_sequence_length=120,
+                    max_sequence_length=512,
                 )
 
                 if prompt_embeds.ndim == 3:
