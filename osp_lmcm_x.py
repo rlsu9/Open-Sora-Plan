@@ -913,7 +913,7 @@ accelerator = Accelerator(
     mixed_precision=args.mixed_precision,
     log_with=args.report_to,
     project_config=accelerator_project_config,
-    split_batches=True,  # It's important to set this to True when using webdataset to get the right number of steps for lr scheduling. If set to False, the number of steps will be devide by the number of processes assuming batches are multiplied by the number of processes
+    split_batches=False,  # It's important to set this to True when using webdataset to get the right number of steps for lr scheduling. If set to False, the number of steps will be devide by the number of processes assuming batches are multiplied by the number of processes
 )
 tokenizer= T5Tokenizer.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir)
 
@@ -945,7 +945,12 @@ def prepare_latents(scheduler, batch_size, num_channels_latents, num_frames, hei
 
 def main(args):
     device=accelerator.device
-    weight_dtype = torch.float16
+    weight_dtype = torch.float32
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+        
     num_frames = 29
     height = 720
     width = 1280
@@ -1114,10 +1119,10 @@ def main(args):
 
     # Prepare everything with our `accelerator`.
     
-    transformer ,optimizer, lr_scheduler = accelerator.prepare(transformer ,optimizer, lr_scheduler)
+    transformer ,optimizer, train_dataloader, lr_scheduler = accelerator.prepare(transformer ,optimizer, train_dataloader, lr_scheduler)
    
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(train_dataloader.num_batches / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -1134,7 +1139,7 @@ def main(args):
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
-    logger.info(f"  Num batches each epoch = {train_dataloader.num_batches}")
+    # logger.info(f"  Num batches each epoch = {train_dataloader.num_batches}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
@@ -1385,8 +1390,10 @@ def main(args):
                     # if global_step % args.validation_steps == 0:
 
                     #     log_validation(vae, unet, args, accelerator, weight_dtype, global_step, "online")
-
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            
+            avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
+            print(f"avg loss {avg_loss}")
+            logs = {"loss": avg_loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 
