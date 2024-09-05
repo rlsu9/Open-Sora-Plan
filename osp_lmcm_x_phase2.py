@@ -775,6 +775,10 @@ def ddim_solver(teacher_model,zt,t,s,alpha_schedule,sigma_schedule,latents,promp
     zt=zt.to(alpha_schedule.device)
     t=t.to(alpha_schedule.device)
     s=s.to(alpha_schedule.device)
+    c_skip, c_out = scalings_for_boundary_conditions(t)
+    c_skip, c_out = [append_dims(x, latents.ndim) for x in [c_skip, c_out]]
+    c_skip=c_skip.to(zt.dtype)
+    c_out=c_out.to(zt.dtype)
     with torch.no_grad():
         with torch.autocast("cuda"):
             teacher_model.to(weight_dtype)
@@ -791,7 +795,7 @@ def ddim_solver(teacher_model,zt,t,s,alpha_schedule,sigma_schedule,latents,promp
             # print("prompt_attention_mask",prompt_attention_mask.dtype,prompt_attention_mask.shape,prompt_attention_mask)
             # print("current_timestep",time.dtype,time.shape,time)
             # print("added_cond_kwargs",added_cond_kwargs)
-            teacher_output = teacher_model(
+            noise_pred = teacher_model(
                                     zt2.to(teacher_model.device),
                                     encoder_hidden_states=prompt_embeds.to(teacher_model.device),
                                     encoder_attention_mask=prompt_attention_mask.to(teacher_model.device),
@@ -802,17 +806,17 @@ def ddim_solver(teacher_model,zt,t,s,alpha_schedule,sigma_schedule,latents,promp
             # print("teacher_output",teacher_output)
 
             # noise_pred_uncond, noise_pred_text = teacher_output.chunk(2)
-            uncond_teacher_output=teacher_model(
-                                    zt2.to(teacher_model.device),
-                                    encoder_hidden_states=uncond_prompt_embeds.to(teacher_model.device),
-                                    encoder_attention_mask=uncond_prompt_attention_mask.to(teacher_model.device),
-                                    timestep=time.to(teacher_model.device),
-                                    added_cond_kwargs=added_cond_kwargs,
-                                    return_dict=False,
-                                )[0]
-            noise_pred_text=teacher_output
-            noise_pred_uncond=uncond_teacher_output
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            # uncond_teacher_output=teacher_model(
+            #                         zt2.to(teacher_model.device),
+            #                         encoder_hidden_states=uncond_prompt_embeds.to(teacher_model.device),
+            #                         encoder_attention_mask=uncond_prompt_attention_mask.to(teacher_model.device),
+            #                         timestep=time.to(teacher_model.device),
+            #                         added_cond_kwargs=added_cond_kwargs,
+            #                         return_dict=False,
+            #                     )[0]
+            # noise_pred_text=teacher_output
+            # noise_pred_uncond=uncond_teacher_output
+            # noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
             # print("noise_pred",noise_pred.shape)
             # print("teacher_model.config.out_channels",teacher_model.config.out_channels)
             # print("latent_channels",latent_channels)
@@ -889,13 +893,13 @@ def denoise(model,zt,t,s,alpha_schedule,sigma_schedule,latents,prompt_embeds,pro
 def generate_intermediate_t_vectors(steps,step,step_value,t,bsz,device):
     
     # Create a tensor to hold all intermediate t vectors for each batch element
-    intermediate_ts = torch.zeros(steps - step_value.item()+1, bsz, device=device)
+    intermediate_ts = torch.zeros(2*(steps - step_value.item())+1, bsz, device=device)
 
     # Calculate intermediate values for t for each batch element
     for i in range(bsz):
         end_t = t[i].item()
         start_t = 999
-        num_intervals = steps - step[i].item()+1
+        num_intervals = 2*(steps - step[i].item())+1
         if num_intervals > 0:
             # Create evenly spaced values between start_t and end_t
             intermediate_ts[:num_intervals, i] = torch.linspace(start_t, end_t, num_intervals, device=device)
@@ -951,7 +955,7 @@ def main(args):
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
         
-    num_frames = 93
+    num_frames = 29
     height = 720
     width = 1280
     # Make one log on every process with the configuration for debugging.
@@ -1258,7 +1262,7 @@ def main(args):
                 step = step_value.expand(bsz)
 
                 # Randomly select a relative step
-                nrel = torch.randint(20, Tstep + 20, (bsz,), device=device).long()
+                nrel = torch.randint(40, Tstep + 40, (bsz,), device=device).long()
 
                 # Compute initial tstep and t
                 tstep = step.float() / steps 
@@ -1267,7 +1271,7 @@ def main(args):
                 # Ensure t does not exceed 1 - 1/len(alpha_schedule)
                 t = torch.clamp(t, max=1 - 1.0 / length_alpha_schedule)
                 # Compute s
-                s = t - 20.0 / length_alpha_schedule
+                s = t - 40.0 / length_alpha_schedule
 
                 # Round t, s, and tstep to nearest indices in alpha_schedule
                 t = torch.round(t * length_alpha_schedule).long()
@@ -1276,7 +1280,7 @@ def main(args):
 
                 intermediate_t_vectors = generate_intermediate_t_vectors(steps,step,step_value,t,bsz,device)
                 intermediate_t_vectors = intermediate_t_vectors.to(torch.int64)
-                guidance_scale=4.5
+                guidance_scale=0
 
                 (
                     prompt_embeds,

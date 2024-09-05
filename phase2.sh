@@ -1,12 +1,9 @@
-#!/bin/bash
-MODEL_DIR=/lustre/scratch/users/hao.zhang/rlsu_files/opensora/rlsu_resource_folder/opensora_reliance/Open-Sora-Plan-v1.2.0/93x720p
-MODEL_DIR2=/lustre/scratch/users/hao.zhang/rlsu_files/opensora/rlsu_resource_folder/opensora_reliance/Open-Sora-Plan-v1.2.0/93x720p
-OUTPUT_DIR=/lustre/scratch/users/hao.zhang/rlsu_files/CM/93x_without_scale_cm_distill_1e-8
+MODEL_DIR=/lustre/scratch/users/hao.zhang/rlsu_files/opensora/rlsu_resource_folder/opensora_reliance/Open-Sora-Plan-v1.2.0/29x720p
+MODEL_DIR2=/lustre/scratch/users/hao.zhang/rlsu_files/CM/without_scale_cm_distill_1e-8/checkpoint-2000/transformer
+OUTPUT_DIR=/lustre/scratch/users/hao.zhang/rlsu_files/CM/phase_2_cm_distill_1e-8_from_2000
 
 
-accelerate launch \
-  --config_file /lustre/scratch/users/hao.zhang/rlsu_files/codefolder/rlsu_osp/Open-Sora-Plan/scripts/accelerate_configs/deepspeed_zero2_config.yaml \
-   osp_lmcm_x.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --main_process_port 29506 --num_processes 4 osp_lmcm_x_phase2.py \
   --pretrained_teacher_model=$MODEL_DIR \
   --pretrained_student_model=$MODEL_DIR2 \
   --image_dir="/lustre/scratch/users/hao.zhang/rlsu_files/CM/image_output" \
