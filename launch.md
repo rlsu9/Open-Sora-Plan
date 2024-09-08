@@ -25,6 +25,8 @@ gsutil cp gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/video_mixkit_
 # Launch the job, need to do wandb login before launch to see the report
 wandb login
 git checkout dist_version
+
+# adjust the deepspeed config marked in following sh file for dist training and launch.
 bash osp_lmcm_x.sh
 
 
