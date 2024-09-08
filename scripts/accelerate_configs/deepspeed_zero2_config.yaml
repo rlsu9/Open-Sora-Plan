@@ -1,18 +1,12 @@
 compute_environment: LOCAL_MACHINE
 distributed_type: DEEPSPEED
 deepspeed_config:
- deepspeed_config_file: /lustre/scratch/users/hao.zhang/rlsu_files/codefolder/rlsu_osp/Open-Sora-Plan/scripts/accelerate_configs/zero2.json
- deepspeed_hostfile: /lustre/scratch/users/hao.zhang/rlsu_files/codefolder/rlsu_osp/Open-Sora-Plan/scripts/accelerate_configs/hostfile
+ deepspeed_config_file: ./scripts/accelerate_configs/zero2.json
 fsdp_config: {}
-machine_rank: 1
-main_process_ip: 172.23.30.17
+machine_rank: 0
+main_process_ip: null
 main_process_port: 29503
 main_training_function: main
-num_machines: 3
-num_processes: 12
-rdzv_backend: static
-same_network: true
-tpu_env: []
-tpu_use_cluster: false
-tpu_use_sudo: false
+num_machines: 1
+num_processes: 8
 use_cpu: false

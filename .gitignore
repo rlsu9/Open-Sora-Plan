@@ -47,3 +47,6 @@ taming*
 runs/
 samples/
 *validation/
+reliance/
+cache/
+launch.md
