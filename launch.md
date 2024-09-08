@@ -1,5 +1,5 @@
-# Clone repo
 ```bash
+# Clone repo
 git clone https://github.com/rlsu9/Open-Sora-Plan.git
 
 # Prepare the env
