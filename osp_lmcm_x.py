@@ -488,6 +488,21 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--width",
+        type=int,
+        required=True,
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        required=True,
+    )
+    parser.add_argument(
+        "--num_frames",
+        type=int,
+        required=True,
+    )
+    parser.add_argument(
         "--report_to",
         type=str,
         default="tensorboard",
@@ -951,9 +966,9 @@ def main(args):
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
         
-    num_frames = 93
-    height = 720
-    width = 1280
+    num_frames = args.num_frames
+    height = args.height
+    width = args.width
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -1334,14 +1349,13 @@ def main(args):
                     z_ref_s=denoise(transformer,zs,s,tstep,alpha_schedule,sigma_schedule,latents,prompt_embeds,prompt_attention_mask,added_cond_kwargs,latent_channels)
                 z_ref_t=denoise(transformer,zt,t,tstep,alpha_schedule,sigma_schedule,latents,prompt_embeds,prompt_attention_mask,added_cond_kwargs,latent_channels)
                 ref_diff=z_ref_s-z_ref_t
-                # print("zt",zt[0])
-                # print("zs",zs[0])
-                # print("z_ref_s",z_ref_s[0])
-                # print("z_ref_t",z_ref_t[0])
-                # print("ref_diff",ref_diff[0])
                 print('ref_diff',ref_diff.shape)
                 print('ref_diff and view',ref_diff.view(bsz,-1).shape)
-                loss=torch.norm(ref_diff.view(bsz,-1),dim=1)
+                if args.loss_type == "l2":
+                    loss=torch.norm(ref_diff.view(bsz,-1),dim=1)
+                elif args.loss_type == "huber":
+                    huber_c = args.huber_c
+                    loss = (torch.sqrt(ref_diff.view(bsz, -1) ** 2 + huber_c ** 2) - huber_c).mean()
                 # print('loss',loss.shape)
                 loss=loss.mean()
                 print('loss',loss)
