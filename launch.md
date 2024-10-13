@@ -9,7 +9,7 @@ conda activate cm_distill
 pip install -e .
 pip install -e ".[train]"
 pip install -e '.[dev]'
-pip install peft datasets bitsandbytes
+pip install peft datasets bitsandbytes hpsv2
 
 # Prepare google cloud platform, skip if it is ready
 curl https://sdk.cloud.google.com | bash
